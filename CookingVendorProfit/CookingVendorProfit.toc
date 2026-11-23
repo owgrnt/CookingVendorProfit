@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Cooking Vendor Profit
+## Notes: Expected vendor profit for one Cooking craft in WoW Forever
+## Notes-ruRU: Ожидаемая прибыль за одно приготовление при продаже торговцу
+## Version: 1.4.0
+## SavedVariables: CookingVendorProfitDB
+## OptionalDeps: Auctionator, Mastercraft
+
+CookingVendorProfit.lua
+Scan.lua
