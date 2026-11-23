@@ -1,6 +1,6 @@
 local addonName, ns = ...
 local L = GetLocale() == "ruRU" and {
-    title = "Топ‑10 · торговцу +40%",
+    title = "Торговцу +40%",
     open = "Откройте аукцион",
     ready = "Прибыль за одно приготовление",
     loading = "Загрузка рецептов…",
@@ -12,7 +12,7 @@ local L = GetLocale() == "ruRU" and {
     interrupted = "Поиск прерван",
     missing = "Требуется совместимый Auctionator",
 } or {
-    title = "Top 10 · To Vendor +40%",
+    title = "To Vendor +40%",
     open = "Open the auction house",
     ready = "Profit per craft",
     loading = "Loading recipes…",
@@ -26,7 +26,10 @@ local L = GetLocale() == "ruRU" and {
 }
 
 local RANK_LIMIT = 10
-local WIDTH, HEIGHT = 344, 233
+local TOP_SMALL = 5
+local WIDTH, HEIGHT = 280, 206
+local ROW_HEIGHT, ROW_TOP = 16, 26
+local BUTTON_HEIGHT = 18
 local panel, anchor, hookedBus
 local hookedProviders = setmetatable({}, {__mode = "k"})
 local request, entries, message, topRecipeIDs
@@ -39,8 +42,10 @@ end
 local function UpdatePanel()
     if not panel or not anchor then return end
     local available = AuctionWindow() ~= nil and not request
+    local hasTop = available and topRecipeIDs ~= nil and #topRecipeIDs > 0
     panel.scan:SetEnabled(available)
-    panel.scanTop:SetEnabled(available and topRecipeIDs ~= nil and #topRecipeIDs > 0)
+    panel.scanTop:SetEnabled(hasTop)
+    panel.scanTop5:SetEnabled(hasTop)
     local status = message or L.ready
     if not request and not AuctionWindow() then status = L.open end
     panel.status:SetText(status)
@@ -174,7 +179,7 @@ local function BeginShopping(current)
     end
     message = L.scanning:format(#current.terms)
     UpdatePanel()
-    local searchName = current.recipeIDs and " Scan Top 10" or " Scan All"
+    local searchName = current.limit and (" Scan Top " .. current.limit) or " Scan All"
     current.api.MultiSearchAdvanced(addonName .. searchName, current.terms)
     if request == current and not current.started then Finish(L.interrupted) end
 end
@@ -269,9 +274,15 @@ local function Collect(current)
     end
 end
 
-local function Scan(topOnly)
+-- limit = nil -> полный скан; limit = 10 / 5 -> повторная проверка первых N из последнего полного скана
+local function Scan(limit)
     if request or not AuctionWindow() then return end
-    if topOnly and (not topRecipeIDs or #topRecipeIDs == 0) then return end
+    local recipeIDs
+    if limit then
+        if not topRecipeIDs or #topRecipeIDs == 0 then return end
+        recipeIDs = {}
+        for i = 1, math.min(limit, #topRecipeIDs) do recipeIDs[i] = topRecipeIDs[i] end
+    end
     if not (C_TradeSkillUI.GetAllRecipeIDs and C_TradeSkillUI.GetRecipeInfo
         and C_Item.GetItemInfo and C_Item.RequestLoadItemDataByID) then
         Finish(L.noRecipes)
@@ -289,7 +300,7 @@ local function Scan(topOnly)
     local current = {
         api = api, schematics = {}, pending = {}, items = {}, names = {},
         terms = {}, recipes = {}, missing = 0,
-        recipeIDs = topOnly and topRecipeIDs or nil,
+        recipeIDs = recipeIDs, limit = limit,
     }
     request, message, entries = current, L.loading, nil
     UpdatePanel()
@@ -311,6 +322,17 @@ local function StopDrag(widget)
     end
 end
 
+local function SmallButton(parent, width, text, onClick)
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(width, BUTTON_HEIGHT)
+    button:SetNormalFontObject("GameFontNormalSmall")
+    button:SetHighlightFontObject("GameFontHighlightSmall")
+    button:SetDisabledFontObject("GameFontDisableSmall")
+    button:SetText(text)
+    button:SetScript("OnClick", onClick)
+    return button
+end
+
 local function CreatePanel(host)
     local widget = CreateFrame("Frame", nil, host, "BackdropTemplate")
     widget:SetSize(WIDTH, HEIGHT)
@@ -326,19 +348,17 @@ local function CreatePanel(host)
     widget:SetBackdropColor(0.055, 0.045, 0.04, 0.96)
     widget:SetBackdropBorderColor(0.7, 0.6, 0.42, 0.9)
 
-    local title = widget:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOPLEFT", 10, -13)
+    local title = widget:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    title:SetPoint("TOPLEFT", 10, -10)
     title:SetText(L.title)
-    widget.scan = CreateFrame("Button", nil, widget, "UIPanelButtonTemplate")
-    widget.scan:SetSize(76, 21)
-    widget.scanTop = CreateFrame("Button", nil, widget, "UIPanelButtonTemplate")
-    widget.scanTop:SetSize(92, 21)
-    widget.scanTop:SetPoint("TOPRIGHT", -8, -7)
-    widget.scanTop:SetText("Scan Top 10")
-    widget.scanTop:SetScript("OnClick", function() Scan(true) end)
-    widget.scan:SetPoint("RIGHT", widget.scanTop, "LEFT", -4, 0)
-    widget.scan:SetText("Scan All")
-    widget.scan:SetScript("OnClick", function() Scan(false) end)
+
+    -- Порядок слева направо: All | Top 10 | Top 5
+    widget.scanTop5 = SmallButton(widget, 46, "Top 5", function() Scan(TOP_SMALL) end)
+    widget.scanTop5:SetPoint("TOPRIGHT", -6, -5)
+    widget.scanTop = SmallButton(widget, 50, "Top 10", function() Scan(RANK_LIMIT) end)
+    widget.scanTop:SetPoint("RIGHT", widget.scanTop5, "LEFT", -3, 0)
+    widget.scan = SmallButton(widget, 38, "All", function() Scan(nil) end)
+    widget.scan:SetPoint("RIGHT", widget.scanTop, "LEFT", -3, 0)
 
     local header = CreateFrame("Frame", nil, widget)
     header:SetPoint("TOPLEFT", 4, -4)
@@ -351,15 +371,15 @@ local function CreatePanel(host)
     end)
     header:SetScript("OnDragStop", function() StopDrag(widget) end)
     widget.status = widget:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    widget.status:SetPoint("BOTTOMLEFT", 10, 9)
+    widget.status:SetPoint("BOTTOMLEFT", 10, 7)
     widget.rows = {}
     for index = 1, RANK_LIMIT do
         local row = CreateFrame("Frame", nil, widget)
-        row:SetSize(WIDTH - 20, 18)
-        row:SetPoint("TOPLEFT", 10, -32 - (index - 1) * 18)
+        row:SetSize(WIDTH - 20, ROW_HEIGHT)
+        row:SetPoint("TOPLEFT", 10, -ROW_TOP - (index - 1) * ROW_HEIGHT)
         row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.name:SetPoint("LEFT")
-        row.name:SetWidth(180)
+        row.name:SetWidth(136)
         row.name:SetJustifyH("LEFT")
         row.name:SetWordWrap(false)
         row.money = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
